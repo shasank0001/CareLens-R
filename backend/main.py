@@ -65,13 +65,28 @@ class Message(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     mode: str = "symptoms"
-    history: list[Message] = []
+    history: list[Message] = Field(default_factory=list)
     attachment: dict[str, Any] | None = None
 
 
 class ChatResponse(BaseModel):
     reply: str
     red_flags: list[str]
+    model: str
+
+
+class ReportAnalyzeRequest(BaseModel):
+    name: str = "Lab report"
+    text: str
+
+
+class MedicineLookupRequest(BaseModel):
+    query: str
+
+
+class AnalysisResponse(BaseModel):
+    reply: str
+    red_flags: list[str] = Field(default_factory=list)
     model: str
 
 
@@ -175,6 +190,55 @@ async def chat(request: ChatRequest) -> ChatResponse:
 
     reply = await call_groq(messages)
     return ChatResponse(reply=reply, red_flags=red_flags, model=GROQ_MODEL)
+
+
+@app.post("/reports/analyze", response_model=AnalysisResponse)
+async def analyze_report(request: ReportAnalyzeRequest) -> AnalysisResponse:
+    clean_text = request.text.strip()
+    if len(clean_text) < 8:
+        raise HTTPException(status_code=422, detail="Add report text or upload a readable file before analyzing.")
+
+    red_flags = detect_red_flags(clean_text)
+    prompt = f"""
+Report name: {request.name}
+
+Analyze the following medical report for educational use only.
+Return:
+1. A plain-language summary.
+2. Values that appear high, low, or worth discussing, if reference ranges are present.
+3. Practical questions to ask a qualified clinician.
+4. Urgent red flags only if the text clearly supports them.
+
+Report text:
+{clean_text[:MAX_UPLOAD_CHARS]}
+""".strip()
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": prompt},
+    ]
+    reply = await call_groq(messages)
+    return AnalysisResponse(reply=reply, red_flags=red_flags, model=GROQ_MODEL)
+
+
+@app.post("/medicines/lookup", response_model=AnalysisResponse)
+async def lookup_medicine(request: MedicineLookupRequest) -> AnalysisResponse:
+    clean_query = request.query.strip()
+    if len(clean_query) < 2:
+        raise HTTPException(status_code=422, detail="Enter a medicine name or question.")
+
+    prompt = f"""
+Medicine question: {clean_query}
+
+Give educational medicine information only. Include common uses, common side effects, major precautions,
+interaction questions to ask a pharmacist/doctor, and when to seek urgent medical help. Do not prescribe,
+change dose, or tell the user to start/stop a medicine.
+""".strip()
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": prompt},
+    ]
+    reply = await call_groq(messages)
+    return AnalysisResponse(reply=reply, red_flags=detect_red_flags(clean_query), model=GROQ_MODEL)
 
 
 @app.post("/upload")

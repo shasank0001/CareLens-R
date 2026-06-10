@@ -1,86 +1,51 @@
 import {
   AlertTriangle,
+  ArrowRight,
   Bot,
   Check,
   Clipboard,
   Download,
   FileText,
+  Grid2X2,
   HeartPulse,
+  History,
   Loader2,
-  Lock,
-  MessageCircle,
+  LogOut,
+  MessageSquareText,
+  Moon,
   Pill,
   Plus,
   RefreshCw,
+  Search,
   Send,
-  ShieldCheck,
-  Sparkles,
+  Settings,
+  ShieldAlert,
   Stethoscope,
+  Sun,
   Trash2,
   Upload,
+  UserRound,
   X,
 } from "lucide-react";
-import React from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
-const STORAGE_KEY = "carelens.chat.sessions.v1";
-
-const modes = [
-  {
-    id: "symptoms",
-    label: "Symptoms",
-    icon: Stethoscope,
-    hint: "Safe triage-style conversation with follow-up questions.",
-  },
-  {
-    id: "report",
-    label: "Report",
-    icon: FileText,
-    hint: "Plain-language explanation of uploaded or pasted results.",
-  },
-  {
-    id: "medicine",
-    label: "Medicine",
-    icon: Pill,
-    hint: "General medicine info, precautions, and questions to ask.",
-  },
-  {
-    id: "faq",
-    label: "FAQ",
-    icon: MessageCircle,
-    hint: "Patient-friendly answers for everyday health questions.",
-  },
-];
-
-const starters = {
-  symptoms: [
-    "I have fever and throat pain for two days. What should I watch for?",
-    "What symptoms mean I should seek urgent care today?",
-    "Help me prepare questions for my doctor visit.",
-  ],
-  report: [
-    "Explain these CBC report values in simple words.",
-    "Summarize this report and list what I should ask my doctor.",
-    "Which values look high, low, or unclear?",
-  ],
-  medicine: [
-    "What should I ask my doctor before taking ibuprofen?",
-    "Explain common side effects of amoxicillin in simple language.",
-    "What medication details should I confirm with a pharmacist?",
-  ],
-  faq: [
-    "How can I describe my symptoms clearly to a doctor?",
-    "What does follow-up care usually mean?",
-    "How should I prepare for a lab test appointment?",
-  ],
-};
+const CHAT_KEY = "medassist.chat.sessions.v2";
+const REPORT_KEY = "medassist.reports.v2";
+const MEDICINE_KEY = "medassist.medicines.v2";
+const SETTINGS_KEY = "medassist.settings.v2";
 
 const welcomeMessage = {
   role: "assistant",
   content:
-    "I can help explain symptoms, reports, and medicine information in simple language. I am for educational and preliminary support only, not a substitute for a qualified doctor.",
+    "Hi, I am MedAssist AI. Ask about symptoms, medicines, or reports for educational guidance. I cannot diagnose or replace a qualified clinician.",
 };
+
+const starters = [
+  "I have fever and throat pain for two days. What should I watch for?",
+  "What symptoms mean I should seek urgent care today?",
+  "Explain fasting glucose and LDL values in simple words.",
+];
 
 const clientRedFlags = [
   "chest pain",
@@ -103,40 +68,50 @@ const clientRedFlags = [
   "pregnant bleeding",
 ];
 
-function createSession(mode = "symptoms") {
+const navItems = [
+  { id: "dashboard", label: "Dashboard", icon: Grid2X2 },
+  { id: "chat", label: "AI Chat", icon: MessageSquareText },
+  { id: "medicines", label: "Medicines", icon: Pill },
+  { id: "reports", label: "Reports", icon: FileText },
+  { id: "history", label: "History", icon: History },
+  { id: "settings", label: "Settings", icon: Settings },
+];
+
+function createSession() {
   const now = new Date().toISOString();
   return {
     id: crypto.randomUUID(),
     title: "New medical chat",
-    mode,
     messages: [welcomeMessage],
-    attachment: null,
     createdAt: now,
     updatedAt: now,
   };
 }
 
-function loadSessions() {
+function readStorage(key, fallback) {
   try {
-    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-    if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    const value = JSON.parse(localStorage.getItem(key) || "null");
+    return value ?? fallback;
   } catch {
-    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(key);
+    return fallback;
   }
-  return [createSession()];
 }
 
 function titleFromMessage(message) {
   const compact = message.replace(/\s+/g, " ").trim();
   if (!compact) return "New medical chat";
-  return compact.length > 38 ? `${compact.slice(0, 38)}...` : compact;
+  return compact.length > 42 ? `${compact.slice(0, 42)}...` : compact;
 }
 
-function formatTime(value) {
-  return new Intl.DateTimeFormat(undefined, {
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(new Date(value));
+function formatRelative(value) {
+  const diff = Date.now() - new Date(value).getTime();
+  const minutes = Math.max(1, Math.round(diff / 60000));
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.round(hours / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
 }
 
 function detectClientRedFlags(text) {
@@ -159,39 +134,16 @@ function renderInline(text) {
 
 function MessageContent({ content, role }) {
   if (role !== "assistant") return <div>{content}</div>;
-
-  const blocks = [];
   const lines = content.split(/\r?\n/);
+  const blocks = [];
   let index = 0;
 
   while (index < lines.length) {
-    const line = lines[index];
-    const trimmed = line.trim();
-
+    const trimmed = lines[index].trim();
     if (!trimmed) {
       index += 1;
       continue;
     }
-
-    if (trimmed.startsWith("```")) {
-      const codeLines = [];
-      index += 1;
-      while (index < lines.length && !lines[index].trim().startsWith("```")) {
-        codeLines.push(lines[index]);
-        index += 1;
-      }
-      blocks.push({ type: "code", content: codeLines.join("\n") });
-      index += 1;
-      continue;
-    }
-
-    const heading = trimmed.match(/^(#{1,3})\s+(.+)$/);
-    if (heading) {
-      blocks.push({ type: "heading", level: heading[1].length, content: heading[2] });
-      index += 1;
-      continue;
-    }
-
     if (/^[-*]\s+/.test(trimmed)) {
       const items = [];
       while (index < lines.length && /^[-*]\s+/.test(lines[index].trim())) {
@@ -201,7 +153,6 @@ function MessageContent({ content, role }) {
       blocks.push({ type: "ul", items });
       continue;
     }
-
     if (/^\d+[.)]\s+/.test(trimmed)) {
       const items = [];
       while (index < lines.length && /^\d+[.)]\s+/.test(lines[index].trim())) {
@@ -211,14 +162,11 @@ function MessageContent({ content, role }) {
       blocks.push({ type: "ol", items });
       continue;
     }
-
     const paragraph = [trimmed];
     index += 1;
     while (
       index < lines.length &&
       lines[index].trim() &&
-      !lines[index].trim().startsWith("```") &&
-      !/^(#{1,3})\s+/.test(lines[index].trim()) &&
       !/^[-*]\s+/.test(lines[index].trim()) &&
       !/^\d+[.)]\s+/.test(lines[index].trim())
     ) {
@@ -231,10 +179,6 @@ function MessageContent({ content, role }) {
   return (
     <div className="message-content">
       {blocks.map((block, blockIndex) => {
-        if (block.type === "heading") {
-          const HeadingTag = `h${Math.min(block.level + 2, 5)}`;
-          return <HeadingTag key={blockIndex}>{renderInline(block.content)}</HeadingTag>;
-        }
         if (block.type === "ul") {
           return (
             <ul key={blockIndex}>
@@ -253,13 +197,6 @@ function MessageContent({ content, role }) {
             </ol>
           );
         }
-        if (block.type === "code") {
-          return (
-            <pre key={blockIndex}>
-              <code>{block.content}</code>
-            </pre>
-          );
-        }
         return <p key={blockIndex}>{renderInline(block.content)}</p>;
       })}
     </div>
@@ -267,39 +204,72 @@ function MessageContent({ content, role }) {
 }
 
 function App() {
-  const [sessions, setSessions] = useState(loadSessions);
+  const [page, setPage] = useState("dashboard");
+  const [sessions, setSessions] = useState(() => readStorage(CHAT_KEY, [createSession()]));
   const [activeId, setActiveId] = useState(() => sessions[0]?.id);
-  const [input, setInput] = useState("");
-  const [isSending, setIsSending] = useState(false);
-  const [uploading, setUploading] = useState(false);
+  const [reports, setReports] = useState(() => readStorage(REPORT_KEY, []));
+  const [medicineSearches, setMedicineSearches] = useState(() => readStorage(MEDICINE_KEY, []));
+  const [settings, setSettings] = useState(() =>
+    readStorage(SETTINGS_KEY, {
+      name: "ROHIT MUNDURU",
+      email: "mundururohit2@gmail.com",
+      darkMode: false,
+      compactMode: false,
+    })
+  );
+  const [chatInput, setChatInput] = useState("");
+  const [reportName, setReportName] = useState("Lab report");
+  const [reportText, setReportText] = useState("");
+  const [medicineQuery, setMedicineQuery] = useState("");
+  const [loading, setLoading] = useState("");
   const [error, setError] = useState("");
   const [copiedIndex, setCopiedIndex] = useState(null);
   const fileRef = useRef(null);
   const messagesRef = useRef(null);
 
   const activeSession = sessions.find((session) => session.id === activeId) || sessions[0];
-  const mode = activeSession?.mode || "symptoms";
   const messages = activeSession?.messages || [welcomeMessage];
-  const attachment = activeSession?.attachment || null;
-  const currentMode = modes.find((item) => item.id === mode) || modes[0];
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
-  }, [sessions]);
-
-  useEffect(() => {
-    messagesRef.current?.scrollTo({
-      top: messagesRef.current.scrollHeight,
-      behavior: "smooth",
-    });
-  }, [messages.length, isSending, activeId]);
-
-  const redFlagCount = useMemo(
-    () => messages.reduce((sum, msg) => sum + (msg.redFlags?.length || 0), 0),
-    [messages]
+  const userMessages = messages.filter((msg) => msg.role === "user").length;
+  const emergencyCount = sessions.reduce(
+    (total, session) => total + session.messages.reduce((sum, msg) => sum + (msg.redFlags?.length || 0), 0),
+    0
   );
 
-  const transcriptCount = Math.max(0, messages.filter((msg) => msg.role === "user").length);
+  const historyItems = useMemo(() => {
+    const chats = sessions.map((session) => ({
+      id: `chat-${session.id}`,
+      type: "Chat",
+      title: session.title,
+      date: session.updatedAt,
+    }));
+    const reportItems = reports.map((report) => ({
+      id: `report-${report.id}`,
+      type: "Report",
+      title: report.name,
+      date: report.createdAt,
+    }));
+    const medicineItems = medicineSearches.map((medicine) => ({
+      id: `medicine-${medicine.id}`,
+      type: "Medicine",
+      title: medicine.query,
+      date: medicine.createdAt,
+    }));
+    return [...chats, ...reportItems, ...medicineItems].sort((a, b) => new Date(b.date) - new Date(a.date));
+  }, [sessions, reports, medicineSearches]);
+
+  useEffect(() => localStorage.setItem(CHAT_KEY, JSON.stringify(sessions)), [sessions]);
+  useEffect(() => localStorage.setItem(REPORT_KEY, JSON.stringify(reports)), [reports]);
+  useEffect(() => localStorage.setItem(MEDICINE_KEY, JSON.stringify(medicineSearches)), [medicineSearches]);
+  useEffect(() => localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)), [settings]);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = settings.darkMode ? "dark" : "light";
+    document.documentElement.dataset.compact = settings.compactMode ? "true" : "false";
+  }, [settings.darkMode, settings.compactMode]);
+
+  useEffect(() => {
+    messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: "smooth" });
+  }, [messages.length, loading, activeId, page]);
 
   function updateActiveSession(updater) {
     setSessions((current) =>
@@ -311,55 +281,143 @@ function App() {
     );
   }
 
-  function setMode(nextMode) {
-    updateActiveSession((session) => ({ ...session, mode: nextMode }));
-  }
-
-  function newChat(nextMode = mode) {
-    const session = createSession(nextMode);
+  function newChat() {
+    const session = createSession();
     setSessions((current) => [session, ...current]);
     setActiveId(session.id);
-    setInput("");
+    setChatInput("");
+    setPage("chat");
     setError("");
   }
 
-  function deleteSession(sessionId) {
-    setSessions((current) => {
-      if (current.length === 1) {
-        const replacement = createSession();
-        setActiveId(replacement.id);
-        return [replacement];
-      }
-      const next = current.filter((session) => session.id !== sessionId);
-      if (sessionId === activeId) setActiveId(next[0].id);
-      return next;
-    });
-  }
+  async function sendMessage(text = chatInput) {
+    const clean = text.trim();
+    if (!clean || loading) return;
+    setError("");
+    const userMessage = { role: "user", content: clean, redFlags: detectClientRedFlags(clean) };
+    const nextTitle = userMessages === 0 ? titleFromMessage(clean) : activeSession.title;
 
-  function clearChat() {
     updateActiveSession((session) => ({
       ...session,
-      title: "New medical chat",
-      messages: [welcomeMessage],
-      attachment: null,
+      title: nextTitle,
+      messages: [...session.messages, userMessage],
     }));
-    setInput("");
-    setError("");
+    setChatInput("");
+    setLoading("chat");
+
+    try {
+      const history = messages
+        .slice(-8)
+        .filter((msg) => msg.role === "user" || msg.role === "assistant")
+        .map(({ role, content }) => ({ role, content }));
+      const response = await fetch(`${API_URL}/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: clean, mode: "symptoms", history }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Chat request failed");
+      updateActiveSession((session) => ({
+        ...session,
+        messages: [...session.messages, { role: "assistant", content: data.reply, redFlags: data.red_flags }],
+      }));
+    } catch (err) {
+      setError(err.message);
+      updateActiveSession((session) => ({
+        ...session,
+        messages: [
+          ...session.messages,
+          {
+            role: "assistant",
+            content: "I could not reach the assistant service. Check the backend and API key, then try again.",
+          },
+        ],
+      }));
+    } finally {
+      setLoading("");
+    }
   }
 
-  function exportTranscript() {
-    const lines = [
-      "CareLens transcript",
-      `Mode: ${currentMode.label}`,
-      `Exported: ${new Date().toLocaleString()}`,
-      "",
-      ...messages.map((msg) => `${msg.role.toUpperCase()}: ${msg.content}`),
-    ];
-    const blob = new Blob([lines.join("\n\n")], { type: "text/plain" });
+  async function uploadFile(file) {
+    if (!file) return;
+    const form = new FormData();
+    form.append("file", file);
+    setLoading("upload");
+    setError("");
+    try {
+      const response = await fetch(`${API_URL}/upload`, { method: "POST", body: form });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Upload failed");
+      setReportName(data.name || "Uploaded report");
+      setReportText(data.text || "");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading("");
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  }
+
+  async function analyzeReport() {
+    const text = reportText.trim();
+    if (!text || loading) return;
+    setLoading("report");
+    setError("");
+    try {
+      const response = await fetch(`${API_URL}/reports/analyze`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: reportName || "Lab report", text }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Report analysis failed");
+      const item = {
+        id: crypto.randomUUID(),
+        name: reportName || "Lab report",
+        text,
+        result: data.reply,
+        redFlags: data.red_flags || [],
+        createdAt: new Date().toISOString(),
+      };
+      setReports((current) => [item, ...current]);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading("");
+    }
+  }
+
+  async function lookupMedicine(query = medicineQuery) {
+    const clean = query.trim();
+    if (!clean || loading) return;
+    setLoading("medicine");
+    setError("");
+    try {
+      const response = await fetch(`${API_URL}/medicines/lookup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: clean }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Medicine lookup failed");
+      setMedicineSearches((current) => [
+        { id: crypto.randomUUID(), query: clean, result: data.reply, createdAt: new Date().toISOString() },
+        ...current,
+      ]);
+      setMedicineQuery("");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading("");
+    }
+  }
+
+  function exportItem(title, body) {
+    const blob = new Blob([body], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `${activeSession.title.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-transcript.txt`;
+    link.download = `${title.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.txt`;
     link.click();
     URL.revokeObjectURL(url);
   }
@@ -370,310 +428,450 @@ function App() {
     window.setTimeout(() => setCopiedIndex(null), 1200);
   }
 
-  async function uploadFile(file) {
-    if (!file) return;
-    setError("");
-    setUploading(true);
-    const form = new FormData();
-    form.append("file", file);
-
-    try {
-      const response = await fetch(`${API_URL}/upload`, { method: "POST", body: form });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || "Upload failed");
-      updateActiveSession((session) => ({ ...session, attachment: data, mode: "report" }));
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setUploading(false);
-      if (fileRef.current) fileRef.current.value = "";
-    }
-  }
-
-  async function sendMessage(text = input) {
-    const clean = text.trim();
-    if (!clean || isSending) return;
-
-    setError("");
-    const userMessage = { role: "user", content: clean, redFlags: detectClientRedFlags(clean) };
-    const nextMessages = [...messages, userMessage];
-    const nextTitle = transcriptCount === 0 ? titleFromMessage(clean) : activeSession.title;
-
-    updateActiveSession((session) => ({
-      ...session,
-      title: nextTitle,
-      messages: nextMessages,
-    }));
-    setInput("");
-    setIsSending(true);
-
-    try {
-      const history = nextMessages
-        .slice(-9, -1)
-        .filter((msg) => msg.role === "user" || msg.role === "assistant")
-        .map(({ role, content }) => ({ role, content }));
-
-      const response = await fetch(`${API_URL}/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: clean, mode, history, attachment }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || "Chat request failed");
-      updateActiveSession((session) => ({
-        ...session,
-        messages: [
-          ...session.messages,
-          { role: "assistant", content: data.reply, redFlags: data.red_flags },
-        ],
-      }));
-    } catch (err) {
-      setError(err.message);
-      updateActiveSession((session) => ({
-        ...session,
-        messages: [
-          ...session.messages,
-          {
-            role: "assistant",
-            content:
-              "I could not reach the medical assistant service. Please check the backend and Groq API key, then try again.",
-          },
-        ],
-      }));
-    } finally {
-      setIsSending(false);
-    }
-  }
-
   return (
     <main className="app-shell">
-      <section className="left-rail">
+      <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">
-            <HeartPulse size={28} />
+            <HeartPulse size={23} />
           </div>
           <div>
-            <h1>CareLens</h1>
-            <p>AI medical assistant</p>
+            <strong>MedAssist AI</strong>
+            <span>Educational use</span>
           </div>
         </div>
 
-        <button className="new-chat-button" type="button" onClick={() => newChat()}>
-          <Plus size={18} />
-          <span>New chat</span>
-        </button>
-
-        <div className="safety-panel">
-          <ShieldCheck size={22} />
-          <div>
-            <h2>Safety boundary</h2>
-            <p>
-              Educational support only. For emergencies, call local emergency services or go to the nearest emergency department.
-            </p>
-          </div>
-        </div>
-
-        <div className="mode-list" aria-label="Assistant modes">
-          {modes.map((item) => {
+        <nav className="nav-list" aria-label="Primary navigation">
+          {navItems.map((item) => {
             const Icon = item.icon;
             return (
               <button
-                className={mode === item.id ? "mode-button active" : "mode-button"}
+                className={page === item.id ? "nav-item active" : "nav-item"}
                 key={item.id}
-                onClick={() => setMode(item.id)}
                 type="button"
-                title={item.hint}
+                onClick={() => setPage(item.id)}
               >
                 <Icon size={18} />
                 <span>{item.label}</span>
               </button>
             );
           })}
-        </div>
+        </nav>
 
-        <div className="session-stack">
-          <div className="section-label">
-            <span>Chats</span>
-            <small>{sessions.length}</small>
-          </div>
-          <div className="session-list">
-            {sessions.map((session) => (
-              <button
-                className={session.id === activeId ? "session-item active" : "session-item"}
-                key={session.id}
-                type="button"
-                onClick={() => setActiveId(session.id)}
-              >
-                <span>{session.title}</span>
-                <small>{formatTime(session.updatedAt)}</small>
+        <div className="account-panel">
+          <div className="email-chip">{settings.email}</div>
+          <button className="sign-out" type="button">
+            <LogOut size={17} />
+            <span>Sign out</span>
+          </button>
+        </div>
+      </aside>
+
+      <section className="main-panel">
+        <header className="topbar">
+          <h1>{navItems.find((item) => item.id === page)?.label || "Dashboard"}</h1>
+          <button
+            className="theme-button"
+            type="button"
+            onClick={() => setSettings((current) => ({ ...current, darkMode: !current.darkMode }))}
+            title="Toggle theme"
+          >
+            {settings.darkMode ? <Sun size={18} /> : <Moon size={18} />}
+          </button>
+        </header>
+
+        <div className="content">
+          {error && (
+            <div className="error-banner">
+              <AlertTriangle size={18} />
+              <span>{error}</span>
+              <button type="button" onClick={() => setError("")} title="Dismiss">
+                <X size={16} />
               </button>
-            ))}
+            </div>
+          )}
+          {page === "dashboard" && (
+            <Dashboard
+              settings={settings}
+              sessions={sessions}
+              reports={reports}
+              medicineSearches={medicineSearches}
+              emergencyCount={emergencyCount}
+              onStartChat={newChat}
+              onOpenReports={() => setPage("reports")}
+              onOpenMedicines={() => setPage("medicines")}
+            />
+          )}
+          {page === "chat" && (
+            <ChatPage
+              messages={messages}
+              messagesRef={messagesRef}
+              input={chatInput}
+              setInput={setChatInput}
+              loading={loading}
+              sendMessage={sendMessage}
+              starters={starters}
+              copiedIndex={copiedIndex}
+              copyMessage={copyMessage}
+              newChat={newChat}
+              clearChat={() =>
+                updateActiveSession((session) => ({
+                  ...session,
+                  title: "New medical chat",
+                  messages: [welcomeMessage],
+                }))
+              }
+            />
+          )}
+          {page === "medicines" && (
+            <MedicinesPage
+              query={medicineQuery}
+              setQuery={setMedicineQuery}
+              searches={medicineSearches}
+              loading={loading}
+              lookup={lookupMedicine}
+              exportItem={exportItem}
+            />
+          )}
+          {page === "reports" && (
+            <ReportsPage
+              reportName={reportName}
+              setReportName={setReportName}
+              reportText={reportText}
+              setReportText={setReportText}
+              fileRef={fileRef}
+              uploadFile={uploadFile}
+              reports={reports}
+              loading={loading}
+              analyzeReport={analyzeReport}
+              exportItem={exportItem}
+            />
+          )}
+          {page === "history" && <HistoryPage items={historyItems} />}
+          {page === "settings" && <SettingsPage settings={settings} setSettings={setSettings} />}
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function Dashboard({ settings, sessions, reports, medicineSearches, emergencyCount, onStartChat, onOpenReports, onOpenMedicines }) {
+  return (
+    <div className="dashboard page-stack">
+      <section className="welcome">
+        <p>Welcome back</p>
+        <h2>Hi, {settings.name || "ROHIT MUNDURU"} <span aria-hidden="true">👋</span></h2>
+      </section>
+
+      <section className="disclaimer">
+        <strong>Disclaimer:</strong>
+        <span>
+          This application is for educational purposes only and is not a substitute for professional medical advice,
+          diagnosis, or treatment. Always consult a qualified healthcare provider for medical concerns.
+        </span>
+      </section>
+
+      <section className="stats-grid">
+        <StatCard icon={MessageSquareText} label="Total chats" value={Math.max(0, sessions.reduce((sum, item) => sum + item.messages.filter((msg) => msg.role === "user").length, 0))} tone="blue" />
+        <StatCard icon={Pill} label="Medicine searches" value={medicineSearches.length} tone="green" />
+        <StatCard icon={FileText} label="Reports analyzed" value={reports.length} tone="cyan" />
+        <StatCard icon={ShieldAlert} label="Emergency alerts" value={emergencyCount} tone="rose" />
+      </section>
+
+      <section className="two-column">
+        <div className="panel action-panel">
+          <div className="feature-icon blue">
+            <Stethoscope size={23} />
           </div>
+          <h3>Have a question?</h3>
+          <p>Start a conversation with the medical assistant for general educational guidance.</p>
+          <button className="primary-button" type="button" onClick={onStartChat}>
+            <span>Start chat</span>
+            <ArrowRight size={17} />
+          </button>
         </div>
 
-        <div className="metric-grid">
-          <div>
-            <span>{redFlagCount}</span>
-            <p>red flags detected</p>
+        <div className="panel list-panel">
+          <div className="panel-heading">
+            <h3>Recent medicine searches</h3>
+            <button type="button" onClick={onOpenMedicines}>View all</button>
           </div>
-          <div>
-            <span>{attachment ? "1" : "0"}</span>
-            <p>uploads attached</p>
-          </div>
-        </div>
-
-        <div className="privacy-note">
-          <Lock size={17} />
-          <p>Do not upload names, phone numbers, addresses, IDs, or other personal identifiers.</p>
+          {medicineSearches.length === 0 ? (
+            <p className="empty">No medicine searches yet.</p>
+          ) : (
+            medicineSearches.slice(0, 3).map((item) => (
+              <button className="list-row" key={item.id} type="button" onClick={onOpenMedicines}>
+                <span>{item.query}</span>
+                <small>{formatRelative(item.createdAt)}</small>
+              </button>
+            ))
+          )}
         </div>
       </section>
 
-      <section className="chat-zone">
-        <header className="chat-header">
-          <div>
-            <p className="eyebrow">Healthcare + Vision + Safety</p>
-            <h2>{activeSession.title}</h2>
-            <p className="mode-hint">{currentMode.hint}</p>
-          </div>
-          <div className="header-actions">
-            <button className="icon-action" type="button" onClick={exportTranscript} title="Export transcript">
-              <Download size={18} />
-            </button>
-            <button className="icon-action" type="button" onClick={clearChat} title="Clear current chat">
-              <RefreshCw size={18} />
-            </button>
-            <button
-              className="icon-action danger"
-              type="button"
-              onClick={() => deleteSession(activeSession.id)}
-              title="Delete chat"
-            >
-              <Trash2 size={18} />
-            </button>
-            <button className="upload-button" type="button" onClick={() => fileRef.current?.click()}>
-              {uploading ? <Loader2 className="spin" size={18} /> : <Upload size={18} />}
-              <span>{uploading ? "Reading" : "Upload"}</span>
-            </button>
-          </div>
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".pdf,.txt,.csv,.md,image/*"
-            hidden
-            onChange={(event) => uploadFile(event.target.files?.[0])}
-          />
-        </header>
-
-        <div className="status-strip">
-          <div>
-            <Sparkles size={16} />
-            <span>{currentMode.label} mode</span>
-          </div>
-          <div>
-            <MessageCircle size={16} />
-            <span>{transcriptCount} user messages</span>
-          </div>
-          <div>
-            <AlertTriangle size={16} />
-            <span>{redFlagCount} red flags</span>
-          </div>
+      <section className="panel list-panel">
+        <div className="panel-heading">
+          <h3>Recent reports</h3>
+          <button type="button" onClick={onOpenReports}>Open reports</button>
         </div>
-
-        {attachment && (
-          <div className="attachment-strip">
-            <FileText size={18} />
-            <span>{attachment.name}</span>
-            <small>{attachment.notice || "Report text extracted and ready to explain."}</small>
-            <button
-              type="button"
-              onClick={() => updateActiveSession((session) => ({ ...session, attachment: null }))}
-              title="Remove upload"
-            >
-              <X size={16} />
+        {reports.length === 0 ? (
+          <p className="empty">No reports analyzed yet.</p>
+        ) : (
+          reports.slice(0, 4).map((item) => (
+            <button className="list-row" key={item.id} type="button" onClick={onOpenReports}>
+              <span>{item.name}</span>
+              <small>{formatRelative(item.createdAt)}</small>
             </button>
-          </div>
+          ))
         )}
+      </section>
+    </div>
+  );
+}
 
-        {error && (
-          <div className="error-banner">
-            <AlertTriangle size={18} />
-            <span>{error}</span>
-          </div>
+function StatCard({ icon: Icon, label, value, tone }) {
+  return (
+    <div className="stat-card">
+      <div className={`feature-icon ${tone}`}>
+        <Icon size={21} />
+      </div>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function ChatPage({ messages, messagesRef, input, setInput, loading, sendMessage, starters, copiedIndex, copyMessage, newChat, clearChat }) {
+  return (
+    <div className="chat-layout">
+      <div className="chat-toolbar">
+        <div>
+          <h2>AI medical chat</h2>
+          <p>Ask focused questions and get plain-language, safety-aware guidance.</p>
+        </div>
+        <div>
+          <button className="ghost-button" type="button" onClick={clearChat}><RefreshCw size={17} /> Clear</button>
+          <button className="primary-button" type="button" onClick={newChat}><Plus size={17} /> New chat</button>
+        </div>
+      </div>
+
+      <div className="messages" ref={messagesRef} aria-live="polite">
+        {messages.map((msg, index) => (
+          <article className={`message ${msg.role}`} key={`${msg.role}-${index}`}>
+            <div className="avatar">{msg.role === "assistant" ? <Bot size={18} /> : <UserRound size={18} />}</div>
+            <div className="bubble">
+              {msg.redFlags?.length > 0 && (
+                <div className="red-flag">
+                  <AlertTriangle size={15} />
+                  Emergency warning terms detected: {msg.redFlags.join(", ")}
+                </div>
+              )}
+              <MessageContent content={msg.content} role={msg.role} />
+              {msg.role === "assistant" && (
+                <button className="copy-button" type="button" onClick={() => copyMessage(msg.content, index)}>
+                  {copiedIndex === index ? <Check size={14} /> : <Clipboard size={14} />}
+                  <span>{copiedIndex === index ? "Copied" : "Copy"}</span>
+                </button>
+              )}
+            </div>
+          </article>
+        ))}
+        {loading === "chat" && (
+          <article className="message assistant">
+            <div className="avatar"><Bot size={18} /></div>
+            <div className="bubble thinking"><Loader2 className="spin" size={18} /> Thinking carefully...</div>
+          </article>
         )}
+      </div>
 
-        <div className="messages" aria-live="polite" ref={messagesRef}>
-          {messages.map((msg, index) => (
-            <article className={`message ${msg.role}`} key={`${activeId}-${msg.role}-${index}`}>
-              <div className="avatar">{msg.role === "assistant" ? <Bot size={18} /> : "You"}</div>
-              <div className="bubble">
-                {msg.redFlags?.length > 0 && (
-                  <div className="red-flag">
-                    <AlertTriangle size={16} />
-                    Emergency warning terms detected: {msg.redFlags.join(", ")}
-                  </div>
-                )}
-                <MessageContent content={msg.content} role={msg.role} />
-                {msg.role === "assistant" && (
-                  <button
-                    className="copy-button"
-                    type="button"
-                    onClick={() => copyMessage(msg.content, index)}
-                    title="Copy answer"
-                  >
-                    {copiedIndex === index ? <Check size={14} /> : <Clipboard size={14} />}
-                    <span>{copiedIndex === index ? "Copied" : "Copy"}</span>
-                  </button>
-                )}
-              </div>
-            </article>
-          ))}
-          {isSending && (
-            <article className="message assistant">
-              <div className="avatar">
-                <Bot size={18} />
-              </div>
-              <div className="bubble thinking">
-                <Loader2 className="spin" size={18} />
-                Thinking carefully...
-              </div>
-            </article>
-          )}
-        </div>
+      <div className="starter-row">
+        {starters.map((starter) => (
+          <button key={starter} type="button" onClick={() => sendMessage(starter)}>{starter}</button>
+        ))}
+      </div>
 
-        <div className="starter-row">
-          {starters[mode].map((starter) => (
-            <button key={starter} type="button" onClick={() => sendMessage(starter)}>
-              {starter}
-            </button>
-          ))}
-        </div>
-
-        <form
-          className="composer"
-          onSubmit={(event) => {
-            event.preventDefault();
-            sendMessage();
+      <form className="composer" onSubmit={(event) => { event.preventDefault(); sendMessage(); }}>
+        <textarea
+          value={input}
+          onChange={(event) => setInput(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              sendMessage();
+            }
           }}
-        >
+          placeholder="Ask a medical question..."
+          rows={2}
+        />
+        <button type="submit" disabled={loading === "chat" || !input.trim()} title="Send">
+          {loading === "chat" ? <Loader2 className="spin" size={19} /> : <Send size={19} />}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function ReportsPage({ reportName, setReportName, reportText, setReportText, fileRef, uploadFile, reports, loading, analyzeReport, exportItem }) {
+  const latest = reports[0];
+  return (
+    <div className="page-stack narrow">
+      <section className="panel analyzer-panel">
+        <div className="section-title">
+          <div className="feature-icon cyan"><FileText size={24} /></div>
+          <div>
+            <h2>Medical report analyzer</h2>
+            <p>Upload a text/PDF report or paste lab values. The AI explains findings in plain language and flags abnormal values.</p>
+          </div>
+        </div>
+
+        <label className="field">
+          <span>Report name</span>
+          <div className="inline-field">
+            <input value={reportName} onChange={(event) => setReportName(event.target.value)} placeholder="Lab report" />
+            <button className="ghost-button upload-control" type="button" onClick={() => fileRef.current?.click()}>
+              {loading === "upload" ? <Loader2 className="spin" size={17} /> : <Upload size={17} />}
+              <span>Upload file</span>
+            </button>
+          </div>
+        </label>
+        <input ref={fileRef} hidden type="file" accept=".pdf,.txt,.csv,.md,image/*" onChange={(event) => uploadFile(event.target.files?.[0])} />
+
+        <label className="field">
+          <span>Report text</span>
           <textarea
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            onInput={(event) => setInput(event.currentTarget.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault();
-                sendMessage();
-              }
-            }}
-            placeholder="Ask about symptoms, upload a report, or ask a medicine question..."
-            rows={2}
+            className="report-textarea"
+            value={reportText}
+            onChange={(event) => setReportText(event.target.value)}
+            placeholder={"Paste lab values or report text here, e.g.\nHemoglobin: 10.2 g/dL (12-16)\nFasting glucose: 142 mg/dL\nLDL cholesterol: 165 mg/dL"}
           />
-          <button type="submit" disabled={isSending || !input.trim()} title="Send message">
-            {isSending ? <Loader2 className="spin" size={20} /> : <Send size={20} />}
+        </label>
+
+        <button className="full-button" type="button" onClick={analyzeReport} disabled={loading === "report" || !reportText.trim()}>
+          {loading === "report" ? <Loader2 className="spin" size={17} /> : null}
+          <span>{loading === "report" ? "Analyzing..." : "Analyze report"}</span>
+        </button>
+      </section>
+
+      <section className="panel list-panel">
+        <div className="panel-heading">
+          <h3>Recent reports</h3>
+          {latest && <button type="button" onClick={() => exportItem(latest.name, latest.result)}>Export latest</button>}
+        </div>
+        {reports.length === 0 ? (
+          <p className="empty">No reports analyzed yet.</p>
+        ) : (
+          reports.map((report) => (
+            <details className="result-card" key={report.id} open={report.id === latest.id}>
+              <summary>
+                <span>{report.name}</span>
+                <small>{formatRelative(report.createdAt)}</small>
+              </summary>
+              <MessageContent content={report.result} role="assistant" />
+            </details>
+          ))
+        )}
+      </section>
+    </div>
+  );
+}
+
+function MedicinesPage({ query, setQuery, searches, loading, lookup, exportItem }) {
+  return (
+    <div className="page-stack narrow">
+      <section className="panel analyzer-panel">
+        <div className="section-title">
+          <div className="feature-icon green"><Pill size={24} /></div>
+          <div>
+            <h2>Medicine information</h2>
+            <p>Search a medicine name or ask a safety question. Results are educational and should be confirmed with a clinician.</p>
+          </div>
+        </div>
+        <form className="search-form" onSubmit={(event) => { event.preventDefault(); lookup(); }}>
+          <div className="search-box">
+            <Search size={18} />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="e.g. Montek LC, ibuprofen, amoxicillin side effects" />
+          </div>
+          <button className="primary-button" type="submit" disabled={loading === "medicine" || !query.trim()}>
+            {loading === "medicine" ? <Loader2 className="spin" size={17} /> : <Search size={17} />}
+            <span>Search</span>
           </button>
         </form>
       </section>
-    </main>
+
+      <section className="panel list-panel">
+        <div className="panel-heading"><h3>Recent medicine searches</h3></div>
+        {searches.length === 0 ? (
+          <p className="empty">No medicine searches yet.</p>
+        ) : (
+          searches.map((item, index) => (
+            <details className="result-card" key={item.id} open={index === 0}>
+              <summary>
+                <span>{item.query}</span>
+                <small>{formatRelative(item.createdAt)}</small>
+              </summary>
+              <MessageContent content={item.result} role="assistant" />
+              <button className="ghost-button export-inline" type="button" onClick={() => exportItem(item.query, item.result)}>
+                <Download size={16} />
+                Export
+              </button>
+            </details>
+          ))
+        )}
+      </section>
+    </div>
+  );
+}
+
+function HistoryPage({ items }) {
+  return (
+    <div className="page-stack narrow">
+      <section className="panel list-panel">
+        <div className="panel-heading"><h3>Activity history</h3></div>
+        {items.length === 0 ? (
+          <p className="empty">No activity yet.</p>
+        ) : (
+          items.map((item) => (
+            <div className="history-row" key={item.id}>
+              <span>{item.type}</span>
+              <strong>{item.title}</strong>
+              <small>{formatRelative(item.date)}</small>
+            </div>
+          ))
+        )}
+      </section>
+    </div>
+  );
+}
+
+function SettingsPage({ settings, setSettings }) {
+  return (
+    <div className="page-stack narrow">
+      <section className="panel analyzer-panel">
+        <div className="section-title">
+          <div className="feature-icon blue"><Settings size={24} /></div>
+          <div>
+            <h2>Settings</h2>
+            <p>Personalize the app shell and dashboard identity.</p>
+          </div>
+        </div>
+        <label className="field">
+          <span>Display name</span>
+          <input value={settings.name} onChange={(event) => setSettings((current) => ({ ...current, name: event.target.value }))} />
+        </label>
+        <label className="field">
+          <span>Email</span>
+          <input value={settings.email} onChange={(event) => setSettings((current) => ({ ...current, email: event.target.value }))} />
+        </label>
+        <label className="toggle-row">
+          <span>Dark mode</span>
+          <input type="checkbox" checked={settings.darkMode} onChange={(event) => setSettings((current) => ({ ...current, darkMode: event.target.checked }))} />
+        </label>
+        <label className="toggle-row">
+          <span>Compact mode</span>
+          <input type="checkbox" checked={settings.compactMode} onChange={(event) => setSettings((current) => ({ ...current, compactMode: event.target.checked }))} />
+        </label>
+      </section>
+    </div>
   );
 }
 

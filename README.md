@@ -1,17 +1,25 @@
-# CareLens - AI Medical Assistant Bot
+# MedAssist AI - Medical Assistant App
 
-A simple React + FastAPI medical assistant for educational/preliminary support. It uses Groq's OpenAI-compatible API with `openai/gpt-oss-120b` by default.
+A React + FastAPI medical assistant for educational/preliminary support. It uses Groq's OpenAI-compatible API with `openai/gpt-oss-120b` by default.
 
 ## Features
 
+- Dashboard with totals for chats, medicine searches, reports, and emergency alerts
+- Sidebar navigation for Dashboard, AI Chat, Medicines, Reports, History, and Settings
 - Safe symptom chat with emergency red-flag detection
-- Report explainer for PDF, TXT, CSV, and Markdown uploads
-- Medical image upload awareness with clear limitations for the text-only model
-- Medicine information and patient FAQ modes
-- Privacy notice for uploaded medical data
-- Local browser chat sessions with New Chat, session switching, clear, delete, and transcript export
-- Copy answers and press Enter to send messages
+- Report analyzer for PDF, TXT, CSV, and Markdown uploads plus pasted lab values
+- Medicine lookup with common-use, side-effect, precaution, and pharmacist-question guidance
+- Local browser history for chats, reports, medicine searches, and user settings
+- Dark mode, compact mode, copy answers, export results, and press Enter to send messages
 - No login required
+
+## API Routes
+
+- `GET /health`
+- `POST /chat`
+- `POST /upload`
+- `POST /reports/analyze`
+- `POST /medicines/lookup`
 
 ## Run Locally
 

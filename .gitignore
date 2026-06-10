@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Environment and secrets
+.env
+*.env
+!*.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Frontend build output
+dist/
+build/
+
+# Local tooling artifacts
+.playwright-cli/
+output/
+
+# OS/editor noise
+.DS_Store
+.idea/
+.vscode/
+
+# npm lockfile can be regenerated
+frontend/package-lock.json
